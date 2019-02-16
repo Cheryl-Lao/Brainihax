@@ -1,76 +1,23 @@
-import http.client, urllib.request, urllib.parse, urllib.error, base64, requests, time, json
+import http.client, urllib.request, urllib.parse, urllib.error, base64, requests, time, json, heapq
 
 import sys
-
-def find_L(predictions):
-    #TODO -- turn this into a python max heap 
-    
-    biggest_L = None
-    biggest_N = None
-
-    for prediction in predictions:
-        if prediction['tagName'] == "L":
-            #If there has been no leukocoria entry yet, this entry is the most likely by default
-            if not biggest_L:
-                biggest_L = prediction
-            else:
-                #Take the new entry if we're more confident in it
-                if float(prediction['probability']) > float(biggest_L['probability']):
-                    biggest_L = prediction
-        else:
-            #If there has been no normal entry yet, this entry is the most likely by default
-            if not biggest_N:
-                biggest_N = prediction
-            else:
-                #Take the new entry if we're more confident in it
-                if float(prediction['probability']) > float(biggest_N['probability']):
-                    biggest_N = prediction
-           
-    return (biggest_L, biggest_N)
-    
-    
-#Determines which eye has the leukocoria
-"""
-One eye with L, one eye without
-
-More than one L:
--Take top 2 and then compare their percentages. if the discrepancy is huge, ignore the smaller one
-
-No L identification: normal
-
-
-Overlap detection:
--look at whether something is in a ___% margin of another box ()
-
-
--{'left': 0.05884423, 'top': 0.435253441, 'width': 0.170019567, 'height': 0.1491468}
-
-
--normal and L are in a queue from most to least likely.
-Check that the 
-
-
-left and right eye -- how to we differentiate them
-
-"""
 
 def area_from_tuple(boundingBox):
     width = boundingBox['width']
     height = boundingBox['height']
     return float(width) * float(height)
-    
+
     
 def coords_from_tuple(boundingBox):
-    #top left is (0,0)
     left = boundingBox['left']
     top = boundingBox['top']
     width = boundingBox['width']
     height = boundingBox['height']
     
-    top_left = tuple(left, top)
-    top_right = tuple(left + width, top)
-    bottom_left = tuple(left, top + height)
-    bottom_right = tuple(left + width, top + height)
+    top_left = (left, top)
+    top_right = (left + width, top)
+    bottom_left = (left, top + height)
+    bottom_right = (left + width, top + height)
     return [top_left, top_right, bottom_left, bottom_right]
 
     
@@ -89,48 +36,69 @@ def is_overlapping(boundingBox1, boundingBox2):
     
     if (overlap_percentage1 > 0.8 or overlap_percentage2 > 0.8):
         return True
-    
+    return False
+   
+def categorize_eyes(predictions):
 
-#Returns the side that has the Leukocoria
-def orientation_determination(L_location, N_location):
-    L_left = L_location['boundingBox']['left']
-    N_left = N_location['boundingBox']['left']
+    heap = []
+
+    for prediction in predictions:
+        heapq.heappush(heap, (-1 * float(prediction['probability']), prediction))
+
+    most_likely = heapq.heappop(heap)[1]
+    second_most_likely = heapq.heappop(heap)[1]
+    
+    #If the top two choices overlap, pick another one
+    while(is_overlapping(most_likely['boundingBox'], second_most_likely['boundingBox'])):
+        second_most_likely = heapq.heappop(heap)[1]
+
+    return (most_likely, second_most_likely)
+       
+
+#Orders the eyes from left to right
+def order_L_to_R(L, N):
+    L_left = L['boundingBox']['left']
+    N_left = N['boundingBox']['left']
 
     if L_left > N_left:
-        return 'left'
+        return (L, N)
     else:
-        return 'right'
+        return (N, L)
     
     
-    
+def report_diagnosis(eye1, eye2):
+    if (eye1['tagName'] == 'L' and eye2['tagName'] == 'L'):
+        return 'Both eyes appear to have Leukocoria'
+    elif (eye1['tagName'] == 'L' or eye2['tagName'] == 'L'):
+        eyes = order_L_to_R(eye1, eye2)
+        if eyes[0]['tagName'] == 'L':
+            return 'We are {0}% confident that the left eye has Leukocoria'.format(round(100 * float(eyes[0]['probability']), 2))
+        if eyes[1]['tagName'] == 'L':
+            return 'We are {0}% confident that the right eye has Leukocoria'.format(round(100 * float(eyes[1]['probability']), 2))
+    else:
+        return 'No Leukocoria detected'
+            
+            
+            
 #---Setting up the connection---
 project_id = '922a5f49-caba-4765-9c93-f477802076ef'
-# without flips   iteration_id = 'b6349a1d-8acd-4038-9967-3123fc2dd393'
-# with flips iteration_id = '433c5b96-513d-47b6-b47d-129eba02a47b'
-iteration_id = '067cafec-c7d1-4adb-9a53-333c1ecac28d'
+iteration_id = '319f3179-6b76-4c44-bfee-2703f527d34d'
+prediction_key = '0cda307794064acca38bb0f860932935'
 endpoint = 'https://southcentralus.api.cognitive.microsoft.com/customvision/v2.0/Prediction/{0}/url?iterationId={1}'.format(project_id, iteration_id)
 
-prediction_key = '0cda307794064acca38bb0f860932935'
-
 # HTTP request to send to the API
-# Look at the RecognizeText function from Microsoft
 headers = {
     # Request headers.
-    # Another valid content type is "application/octet-stream".
     'Prediction-Key': prediction_key,
     'Content-Type': 'application/json',
 }
 
 #Gets the first argument as the url of the picture to process
-#body = {'url' : sys.argv[1]}
-body = {'url' : 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQY-xnN5ybvgu3o9LKD2yBHpQln7An4IIgb3HoaB1MMx1Wupe6D'}
-#body = {'url' : 'https://www.medscape.com/content/2004/00/49/13/491384/art-cc491384.fig2.jpg'}
-
+body = {'url' : sys.argv[1]}
 
 #Try sending the image to the CV API
 try:
     print('Getting response...')
-    #response = requests.request('POST ', endpoint, json=body, data=None, headers=headers, params=params)
     response = requests.request('POST ', endpoint, json=body, data=None, headers=headers)
 
     #2__ is the success status code
@@ -147,18 +115,11 @@ try:
     # Contains the JSON data. The following formats the JSON data for display.
     parsed = json.loads(response.text)
     predictions = parsed['predictions']
+
+    eye1, eye2 = categorize_eyes(predictions)
+
+    print(report_diagnosis(eye1, eye2))
     
-    L, N = find_L(predictions)
-    L_eye = L
-    if L_eye:
-        print('Leukocoria probability: ' + str(float(L_eye['probability']) * 100) + '%')
-    else:
-       print('Eyes are normal')
-       
-    print(orientation_determination(L, N))
-    
-    # Get the transcribed lines of text
-    #print(parsed)
     
 #Catch any exceptions that might happen
 except Exception as e:
