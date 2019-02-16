@@ -93,17 +93,13 @@ def is_overlapping(boundingBox1, boundingBox2):
 
 #Returns the side that has the Leukocoria
 def orientation_determination(L_location, N_location):
-    
-    
-    if L_location['left'] > N_location['left']:
-        print(L_location['left'])
-        print(N_location['left'])
+    L_left = L_location['boundingBox']['left']
+    N_left = N_location['boundingBox']['left']
+
+    if L_left > N_left:
         return 'left'
     else:
-        print(L_location['left'])
-        print(N_location['left'])
         return 'right'
-
     
     
     
@@ -158,14 +154,8 @@ try:
         print('Leukocoria probability: ' + str(float(L_eye['probability']) * 100) + '%')
     else:
        print('Eyes are normal')
-
-    if N:
-        print('N probability: ' + str(float(N['probability']) * 100) + '%')
-    else:
-       print('Eyes are normal')
-	   
-	   
-    orientation_determination(L, N)
+       
+    print(orientation_determination(L, N))
     
     # Get the transcribed lines of text
     #print(parsed)
